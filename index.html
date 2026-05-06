@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>二分搜尋視覺化：點選挑戰！</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f8fafc;
+            user-select: none;
+            overflow-x: hidden;
+        }
+
+        .number-node {
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+        }
+
+        .number-node:hover:not(.disabled) {
+            transform: translateY(-2px);
+            z-index: 20;
+        }
+
+        .disabled {
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .binary-log-enter {
+            animation: slideIn 0.3s ease-out forwards;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+
+        /* 灰階樣式：第六次才猜中時使用 */
+        .grayscale-mode {
+            filter: grayscale(100%);
+            transition: filter 1s ease;
+        }
+
+        #fireworks-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+    <canvas id="fireworks-canvas"></canvas>
+
+    <div id="main-container" class="max-w-5xl mx-auto">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-slate-800 mb-2">二分搜尋：點選挑戰！</h1>
+            <p class="text-slate-600">看看你能否在 5 次內找到目標？</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Main Game Card -->
+                <div id="game-card" class="bg-white rounded-2xl shadow-xl p-6 border border-slate-200">
+                    <div class="flex justify-between items-center mb-6">
+                        <div id="game-status" class="text-lg font-semibold text-blue-600">
+                            準備就緒，請點擊一個數字！
+                        </div>
+                        <div class="text-sm bg-slate-100 px-3 py-1 rounded-full text-slate-600">
+                            猜測次數：<span id="step-count" class="font-bold text-blue-600">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Visual Grid Container -->
+                    <div class="bg-slate-50 rounded-xl p-4 md:p-6 min-h-[350px] mb-6 shadow-inner">
+                        <div id="number-grid" class="grid grid-cols-5 sm:grid-cols-10 gap-2 justify-items-center">
+                            <!-- Numbers injected by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Visual Range Info -->
+                    <div class="flex items-center justify-between p-4 bg-blue-50 rounded-xl border border-blue-100">
+                        <div class="text-center flex-1">
+                            <div class="text-[10px] uppercase tracking-wider text-blue-400 font-bold">下界 (Low)</div>
+                            <div id="low-val" class="text-2xl font-mono font-bold text-blue-700">0</div>
+                        </div>
+                        <div class="h-8 w-[1px] bg-blue-200"></div>
+                        <div class="text-center flex-1">
+                            <div class="text-[10px] uppercase tracking-wider text-blue-400 font-bold">推薦猜測 (Mid)</div>
+                            <div id="mid-val" class="text-2xl font-mono font-bold text-blue-500">-</div>
+                        </div>
+                        <div class="h-8 w-[1px] bg-blue-200"></div>
+                        <div class="text-center flex-1">
+                            <div class="text-[10px] uppercase tracking-wider text-blue-400 font-bold">上界 (High)</div>
+                            <div id="high-val" class="text-2xl font-mono font-bold text-blue-700">99</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Strategy Tip -->
+                <div class="bg-slate-800 rounded-2xl p-5 text-white shadow-lg">
+                    <h3 class="font-bold mb-2 flex items-center text-blue-400">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                        獲勝條件
+                    </h3>
+                    <ul class="text-sm text-slate-300 space-y-1">
+                        <li>🎯 5 次內猜中：煙火慶祝 + 彩色介面</li>
+                        <li>🐢 6 次以上猜中：灰色平凡介面</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="space-y-6">
+                <div id="log-card" class="bg-white rounded-2xl shadow-md border border-slate-200 p-6 flex flex-col h-full transition-all">
+                    <h2 class="font-bold text-slate-800 mb-4 flex justify-between items-center">
+                        歷史紀錄
+                        <button onclick="initGame()" class="text-xs text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition">重新開始</button>
+                    </h2>
+                    <div id="search-log" class="space-y-3 h-[500px] overflow-y-auto pr-2 custom-scrollbar text-sm">
+                        <!-- Logs -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Win Modal -->
+    <div id="win-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center z-[110]">
+        <div id="modal-content" class="bg-white rounded-3xl p-10 max-w-sm w-full mx-4 text-center shadow-2xl">
+            <div id="win-icon" class="text-7xl mb-4">✨</div>
+            <h2 id="win-title" class="text-3xl font-bold text-slate-800 mb-2">賓果！</h2>
+            <p id="win-message" class="text-slate-600 mb-8"></p>
+            <button onclick="initGame()" class="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition shadow-lg">
+                再次挑戰
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let targetNumber;
+        let low = 0;
+        let high = 99;
+        let steps = 0;
+        let isGameOver = false;
+
+        const gridEl = document.getElementById('number-grid');
+        const logEl = document.getElementById('search-log');
+        const lowValEl = document.getElementById('low-val');
+        const highValEl = document.getElementById('high-val');
+        const midValEl = document.getElementById('mid-val');
+        const stepEl = document.getElementById('step-count');
+        const statusEl = document.getElementById('game-status');
+        const winModal = document.getElementById('win-modal');
+        const mainContainer = document.body;
+
+        // 煙火相關變數
+        const canvas = document.getElementById('fireworks-canvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+
+        function initGame() {
+            targetNumber = Math.floor(Math.random() * 100);
+            low = 0;
+            high = 99;
+            steps = 0;
+            isGameOver = false;
+            
+            // 重置介面狀態
+            mainContainer.classList.remove('grayscale-mode');
+            document.getElementById('modal-content').classList.remove('grayscale');
+            winModal.classList.add('hidden');
+            winModal.classList.remove('flex');
+            logEl.innerHTML = '';
+            particles = []; // 清空煙火
+            
+            renderGrid();
+            updateStats();
+            addLog("新遊戲開始！電腦已選好一個 0-99 的數字。", "info");
+            statusEl.innerText = "請點擊一個數字進行猜測...";
+            statusEl.className = "text-lg font-semibold text-blue-600";
+            
+            resizeCanvas();
+        }
+
+        function renderGrid() {
+            gridEl.innerHTML = '';
+            const mid = Math.floor((low + high) / 2);
+            midValEl.innerText = mid;
+
+            for (let i = 0; i <= 99; i++) {
+                const btn = document.createElement('div');
+                btn.id = `node-${i}`;
+                btn.innerText = i;
+                
+                const isOutOfRange = i < low || i > high;
+                const isMid = i === mid && !isOutOfRange;
+
+                let baseClasses = "number-node w-full h-10 flex items-center justify-center text-sm font-bold rounded-lg border shadow-sm ";
+                
+                if (isGameOver) {
+                    btn.className = baseClasses + (i === targetNumber ? "bg-emerald-500 text-white border-emerald-600" : "bg-slate-100 text-slate-300 border-slate-100 opacity-30 disabled");
+                } else if (isOutOfRange) {
+                    btn.className = baseClasses + "bg-slate-50 text-slate-200 border-slate-50 opacity-20 disabled";
+                } else if (isMid) {
+                    btn.className = baseClasses + "bg-blue-600 text-white border-blue-700 ring-2 ring-blue-200 ring-offset-1";
+                    btn.onclick = () => handleGuess(i);
+                } else {
+                    btn.className = baseClasses + "bg-white text-slate-700 border-slate-200 hover:border-blue-400 hover:bg-blue-50";
+                    btn.onclick = () => handleGuess(i);
+                }
+                
+                gridEl.appendChild(btn);
+            }
+        }
+
+        function updateStats() {
+            stepEl.innerText = steps;
+            lowValEl.innerText = low;
+            highValEl.innerText = high;
+        }
+
+        function handleGuess(num) {
+            if (isGameOver) return;
+            
+            steps++;
+            if (num === targetNumber) {
+                handleWin();
+            } else if (num < targetNumber) {
+                addLog(`猜 ${num}：太小了 ↑`, 'low');
+                statusEl.innerText = `${num} 太小了！`;
+                if (num >= low) low = num + 1;
+                updateStats();
+                renderGrid();
+            } else {
+                addLog(`猜 ${num}：太大了 ↓`, 'high');
+                statusEl.innerText = `${num} 太大了！`;
+                if (num <= high) high = num - 1;
+                updateStats();
+                renderGrid();
+            }
+        }
+
+        function handleWin() {
+            isGameOver = true;
+            renderGrid();
+            
+            const isEfficient = steps <= 5;
+            
+            if (isEfficient) {
+                // 5次內中：煙火 + 彩色
+                startFireworks();
+                document.getElementById('win-icon').innerText = "🎆";
+                document.getElementById('win-title').innerText = "卓越的效率！";
+                document.getElementById('win-title').className = "text-3xl font-bold text-emerald-600 mb-2";
+            } else {
+                // 6次以上中：灰色
+                mainContainer.classList.add('grayscale-mode');
+                document.getElementById('modal-content').classList.add('grayscale');
+                document.getElementById('win-icon').innerText = "🐢";
+                document.getElementById('win-title').innerText = "找到了...";
+                document.getElementById('win-title').className = "text-3xl font-bold text-slate-500 mb-2";
+            }
+
+            const msg = `第 ${steps} 次成功！電腦想的就是 ${targetNumber}。`;
+            addLog(msg, isEfficient ? 'success' : 'info');
+            
+            document.getElementById('win-message').innerHTML = `你找到了數字 <strong>${targetNumber}</strong>！<br>總共花了 <strong>${steps}</strong> 次嘗試。${isEfficient ? '<br><span class="text-emerald-500 font-bold">完美運用二分搜尋！</span>' : ''}`;
+            
+            winModal.classList.remove('hidden');
+            winModal.classList.add('flex');
+        }
+
+        function addLog(msg, type) {
+            const div = document.createElement('div');
+            div.className = `binary-log-enter p-3 rounded-xl border-l-4 shadow-sm ${
+                type === 'low' ? 'bg-amber-50 border-amber-400 text-amber-800' :
+                type === 'high' ? 'bg-rose-50 border-rose-400 text-rose-800' :
+                type === 'success' ? 'bg-emerald-50 border-emerald-400 text-emerald-800 font-bold' :
+                'bg-blue-50 border-blue-400 text-blue-800'
+            }`;
+            div.innerHTML = msg;
+            logEl.prepend(div);
+        }
+
+        // --- 煙火特效邏輯 ---
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.velocity = {
+                    x: (Math.random() - 0.5) * 8,
+                    y: (Math.random() - 0.5) * 8
+                };
+                this.alpha = 1;
+                this.friction = 0.95;
+            }
+            draw() {
+                ctx.globalAlpha = this.alpha;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 2, 0, Math.PI * 2, false);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+            }
+            update() {
+                this.velocity.x *= this.friction;
+                this.velocity.y *= this.friction;
+                this.velocity.y += 0.05; // 重力
+                this.x += this.velocity.x;
+                this.y += this.velocity.y;
+                this.alpha -= 0.01;
+            }
+        }
+
+        function createFirework(x, y) {
+            const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff'];
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            for (let i = 0; i < 40; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        function startFireworks() {
+            let count = 0;
+            const interval = setInterval(() => {
+                createFirework(Math.random() * canvas.width, Math.random() * (canvas.height * 0.5));
+                count++;
+                if (count > 15) clearInterval(interval);
+            }, 300);
+            animateFireworks();
+        }
+
+        function animateFireworks() {
+            if (!isGameOver || steps > 5) return;
+            requestAnimationFrame(animateFireworks);
+            ctx.fillStyle = 'rgba(248, 250, 252, 0.1)'; // 與 body 背景色一致
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            particles.forEach((particle, index) => {
+                if (particle.alpha > 0) {
+                    particle.update();
+                    particle.draw();
+                } else {
+                    particles.splice(index, 1);
+                }
+            });
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        window.onload = initGame;
+    </script>
+</body>
+</html>
